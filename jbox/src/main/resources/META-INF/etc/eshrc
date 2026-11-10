@@ -1,0 +1,14 @@
+alias jbox=org.espressh.jbox.JBox
+alias ls=org.espressh.jbox.JBox:ls
+alias echo=org.espressh.jbox.JBox:echo
+alias true=org.espressh.jbox.JBox:true
+alias false=org.espressh.jbox.JBox:false
+
+alias esh=org.espressh.jbox.JBox:esh
+alias shutdown=org.espressh.jbox.JBox:shutdown
+
+alias ps=org.espressh.jbox.JBox:ps
+alias top=org.espressh.jbox.JBox:top
+
+alias pwd=org.espressh.jbox.JBox:pwd
+alias cat=org.espressh.jbox.JBox:cat
