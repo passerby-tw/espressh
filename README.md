@@ -1,6 +1,12 @@
 # Espressh
 
-A shell for Espresso. Run multiple Java applications in a single JVM.
+A shell for Espresso. [Run multiple Java applications in a single JVM](https://bgplayground.blogspot.com/2026/11/run-multiple-java-applications-in.html).
+
+<p align="left">
+  <img src="https://github.com/user-attachments/assets/8e19fe51-0822-4998-9f1a-f164b174db4a"
+       alt="espressh"
+       width="240">
+</p>
 
 Espressh uses GraalVM Espresso to run Java applications and provides an interactive `esh` shell, managed processes, virtual terminals, and basic command utilities. JVK coordinates application startup, input and output, interruption, and shutdown within one host JVM.
 
