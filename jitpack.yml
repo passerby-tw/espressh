@@ -1,0 +1,6 @@
+jdk:
+  - openjdk17
+
+install:
+  - mvn -B -N -DskipTests install
+  - mvn -B -f jvk-api/pom.xml -DskipTests clean install
