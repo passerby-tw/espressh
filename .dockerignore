@@ -1,0 +1,12 @@
+.git
+**/.git
+**/target
+**/*.jar
+**/*.class
+**/*.log
+.m2
+.idea
+.vscode
+.env
+.env.*
+docs

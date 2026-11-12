@@ -85,6 +85,34 @@ java -jar espressh.jar
 
 Cold startup can currently take more than 30 seconds. Initial prompt latency remains an area for improvement.
 
+## Docker
+
+Build the image from the repository root:
+
+```sh
+docker build -t espressh .
+```
+
+Start an interactive session:
+
+```sh
+docker run --rm -it --init espressh
+```
+
+To access applications and files from the current host directory:
+
+```sh
+docker run --rm -it --init \
+  --mount "type=bind,source=$(pwd),target=/workspace" \
+  espressh
+```
+
+The container starts `esh` in `/workspace`. It runs as the `espressh` user with UID 1000; mounted files need appropriate read/write permissions for that user. Use `exit` and confirm shutdown to end the session.
+
+The [Dockerfile](Dockerfile) builds the application in a separate stage and uses the matching GraalVM Community JDK in the final image. Maven and project sources remain in the build stage. A complete JDK stays in the runtime image so that Espresso can use its standard library and the integrated JDK tools remain available.
+
+This image provides the CLI. GUI display forwarding is not configured. Keep stdin open with `-it`; closing the console input triggers Espressh's frontend-loss handling.
+
 ## Run Java applications
 
 Enter an executable JAR's path directly:
