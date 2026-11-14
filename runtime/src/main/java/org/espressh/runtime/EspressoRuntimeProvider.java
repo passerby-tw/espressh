@@ -14,6 +14,7 @@ import java.util.concurrent.TimeUnit;
 import org.espressh.core.*;
 import org.graalvm.polyglot.*;
 import org.graalvm.polyglot.io.IOAccess;
+import static org.espressh.runtime.ExecutionTiming.Phase.*;
 
 /**
  * Runtime module implementation with MAIN_BOUND lifetime. Pinned environment/ProcessHandle
@@ -22,7 +23,7 @@ import org.graalvm.polyglot.io.IOAccess;
  */
 public final class EspressoRuntimeProvider implements AutoCloseable {
   private static final boolean TRACE_WORKERS = Boolean.getBoolean("espressh.worker.trace");
-  private final Engine engine = newEngine();
+  private final Engine engine;
 
   String engineVersion() {
     return engine.getVersion();
@@ -94,7 +95,7 @@ public final class EspressoRuntimeProvider implements AutoCloseable {
   private final ConcurrentHashMap<Long, Execution> executions = new ConcurrentHashMap<>();
   private boolean closed;
 
-  private final Path bootstrapClasspath;
+  private final GuestClasspath guestClasspath;
   private final java.util.function.Consumer<Execution> onStarted;
 
   public EspressoRuntimeProvider(Path bootstrapClasspath) {
@@ -103,8 +104,28 @@ public final class EspressoRuntimeProvider implements AutoCloseable {
 
   EspressoRuntimeProvider(
       Path bootstrapClasspath, java.util.function.Consumer<Execution> onStarted) {
-    this.bootstrapClasspath = Objects.requireNonNull(bootstrapClasspath).toAbsolutePath();
     this.onStarted = Objects.requireNonNull(onStarted);
+    this.guestClasspath = GuestClasspath.open(Objects.requireNonNull(bootstrapClasspath));
+    try {
+      this.engine = newEngine();
+    } catch (RuntimeException | Error failure) {
+      try { guestClasspath.close(); }
+      catch (RuntimeException cleanup) { failure.addSuppressed(cleanup); }
+      throw failure;
+    }
+  }
+
+  List<Path> distributionClasspath(List<Path> application) {
+    return guestClasspath.distributionSnapshot(application);
+  }
+
+  boolean sameDistribution(List<Path> parent, List<Path> child) {
+    return distributionClasspath(parent).equals(guestClasspath.applicationSnapshot(child));
+  }
+
+  boolean sameBootClasspath(List<Path> parent, List<Path> child) {
+    return guestClasspath.applicationSnapshot(parent).equals(guestClasspath.applicationSnapshot(child))
+        || sameDistribution(parent, child);
   }
 
   public String lifetimeMode() {
@@ -163,6 +184,7 @@ public final class EspressoRuntimeProvider implements AutoCloseable {
   }
 
   public final class Execution {
+    private final ExecutionTiming timing = ExecutionTiming.create();
     private final ProcessRecord process;
     private final RuntimeProfile profile;
     private ProcessIo io;
@@ -410,6 +432,8 @@ public final class EspressoRuntimeProvider implements AutoCloseable {
       if (firstStop) traceWorker("STOP_REQUEST", true);
       try {
         unblockIo.run();
+        if (sys instanceof JvkProcessApi api) api.unblockProcessIo();
+        io.unblockBorrowedWriters();
         graphics.beginClose();
         if (sys instanceof JvkProcessApi api) api.close();
       } finally {
@@ -435,7 +459,7 @@ public final class EspressoRuntimeProvider implements AutoCloseable {
       }
     }
 
-    private void finishContext(Context guest) {
+    private void finishContext(Context guest, boolean normalEntryCleanup) {
       boolean own, cancel;
       synchronized (this) {
         own = !contextClosing;
@@ -443,7 +467,7 @@ public final class EspressoRuntimeProvider implements AutoCloseable {
         // entry must not wait forever for residual Guest threads in close(false).
         // Keep the existing failure/System.exit translation path; a cleanup-only
         // cancellation preserves EXITED unless a stop request was accepted.
-        cancel = stop || diagnosticCause == null;
+        cancel = stop || normalEntryCleanup;
         if (own) contextClosing = true;
       }
       if (own) closeContext(guest, cancel);
@@ -478,13 +502,17 @@ public final class EspressoRuntimeProvider implements AutoCloseable {
         }
         // File opens run on this execution thread, outside Kernel/ProcessTable locks.
         // The original borrowed streams remain available if a partial open fails.
+        timing.begin(IO_SETUP);
         try {
           io = io.redirectOutputs(request);
+          if (sys instanceof JvkProcessApi api) api.bindProcessIo(io, environment::snapshot);
         } catch (java.io.IOException | SecurityException failure) {
           throw new KernelException(ErrorCode.START_FAILED,
               "Cannot open redirected output: " + failure.getMessage(), failure);
         }
+        timing.begin(ENTRY_RESOLVE);
         Entry entry = resolve(request);
+        timing.begin(CONTEXT_CONFIG);
         var builder =
             Context.newBuilder("java")
                 .engine(engine)
@@ -505,8 +533,11 @@ public final class EspressoRuntimeProvider implements AutoCloseable {
                 .out(io.out())
                 .err(io.err())
                 .option("java.JavaHome", profile.javaHome().toString())
-                .option("java.Classpath", entry.classpath().isEmpty() ? bootstrapClasspath.toString()
-                    : bootstrapClasspath + File.pathSeparator + entry.classpath())
+                .option("java.Classpath", guestClasspath.project(entry.classpath(),
+                    sys instanceof JvkProcessApi api && api.distributionRole()).stream()
+                    .map(Path::toString).collect(java.util.stream.Collectors.joining(File.pathSeparator)))
+                // Parsing hint only; Host same-file checks remain the shell authority.
+                .option("java.Properties.espressh.distribution", guestClasspath.distribution().toString())
                 .option("java.Properties.user.dir", request.cwd().toString())
                 // Display ownership belongs to the Host graphics backend, not Guest DISPLAY.
                 .option(
@@ -521,28 +552,36 @@ public final class EspressoRuntimeProvider implements AutoCloseable {
         // Espresso's list option uses the platform path separator rather than commas.
         if (!entry.addOpens().isEmpty())
           builder.option("java.AddOpens", String.join(File.pathSeparator, entry.addOpens()));
+        timing.begin(CONTEXT_BUILD);
         created = builder.build();
         synchronized (this) {
           context = created;
           if (stop) throw new StoppedBeforeEntry();
         }
+        timing.begin(HOST_BINDINGS);
         created.getPolyglotBindings().putMember("sys", sys);
         created.getPolyglotBindings().putMember("jvk_graphics", graphics);
         created.getPolyglotBindings().putMember("process_stdout", new IoEndpoint(io.out()));
         created.getPolyglotBindings().putMember("process_stderr", new IoEndpoint(io.err()));
+        timing.begin(JAVA_INITIALIZE);
         created.initialize("java");
         // Associate this Context before applet class initialization; owned threads use the same
         // state.
+        timing.begin(ENV_LINK);
         created.getBindings("java").getMember("java.lang.System").invokeMember("getenv");
+        timing.begin(BOOTSTRAP_LOOKUP);
         Value bootstrap =
             created.getBindings("java").getMember("org.espressh.bootstrap.IoBootstrap");
         if (bootstrap == null || !bootstrap.canInvokeMember("install"))
           throw new KernelException(ErrorCode.START_FAILED, "Missing trusted IO bootstrap");
+        timing.begin(BOOTSTRAP_INSTALL);
         bootstrap.invokeMember("install");
+        timing.begin(APP_LOOKUP);
         Value guestClass = created.getBindings("java").getMember(entry.mainClass());
         if (guestClass == null || !guestClass.canInvokeMember(appletWorker ? "runApplet" : "main"))
           throw new KernelException(
               ErrorCode.ENTRY_NOT_FOUND, "Missing main: " + entry.mainClass());
+        timing.begin(ARGV_SETUP);
         Value guestArray =
             created
                 .getBindings("java")
@@ -554,12 +593,14 @@ public final class EspressoRuntimeProvider implements AutoCloseable {
             && guestClass.canInvokeMember("interruptApplet") && guestClass.canInvokeMember("endApplet")) {
           cooperativeDispatcher = guestClass;
         }
+        timing.begin(ENTRY_READY);
         synchronized (this) {
           if (stop) throw new StoppedBeforeEntry();
           process.running();
           entryStarted = true;
           ready.complete(null);
         }
+        timing.begin(MAIN);
         if (appletWorker) runApplets(created, guestClass);
         else guestClass.invokeMember("main", guestArray);
         result = ProcessOutcome.exited(0);
@@ -581,17 +622,39 @@ public final class EspressoRuntimeProvider implements AutoCloseable {
                 e instanceof KernelException k ? k.code() : ErrorCode.START_FAILED,
                 e instanceof KernelException k ? k.getMessage() : "Runtime execution failed");
       } finally {
+        timing.begin(ENTRY_END);
+        boolean normalEntryCleanup = diagnosticCause == null;
         traceWorker("ENTRY_ENDED", false);
         org.espressh.runtime.substitutions.EnvSubstitution.end();
         rejectCommands(new KernelException(ErrorCode.RESOURCE_CLOSED, "Execution ended"));
         // Application mode is MAIN_BOUND; worker remains live between commands.
         Throwable terminationFailure = null;
         try {
+          timing.begin(GRAPHICS_BEGIN_CLOSE);
           graphics.beginClose();
           try {
-            if (created != null) finishContext(created);
+            // MAIN_BOUND must release Host-blocked Guest IO before Context cancellation.
+            // Stop owned children while inherited streams remain open, then close only
+            // our endpoint ends. A pipe writer close preserves pending output for its parent.
+            try {
+              timing.begin(CHILDREN_CLOSE);
+              if (sys instanceof JvkProcessApi api) api.close();
+            } finally {
+              timing.begin(IO_CLOSE);
+              try { io.close(); }
+              catch (Throwable ioFailure) {
+                diagnosticCause = ioFailure;
+                result = ProcessOutcome.failed(ErrorCode.START_FAILED, "IO cleanup failed");
+              }
+            }
           } finally {
-            graphics.close();
+            try {
+              timing.begin(CONTEXT_CLOSE);
+              if (created != null) finishContext(created, normalEntryCleanup);
+            } finally {
+              timing.begin(GRAPHICS_CLOSE);
+              graphics.close();
+            }
           }
         } catch (PolyglotException e) {
           if (e.isExit()) {
@@ -606,6 +669,7 @@ public final class EspressoRuntimeProvider implements AutoCloseable {
           diagnosticCause = e;
           terminationFailure = e;
         }
+        timing.begin(CONFIRM);
         if (terminationFailure == null && cancellationClosed)
           result = ProcessOutcome.cancelled(false);
         if (terminationFailure != null) {
@@ -613,30 +677,15 @@ public final class EspressoRuntimeProvider implements AutoCloseable {
           System.err.println("CONTEXT_CLEANUP_FAILED: PID " + process.pid());
           terminationFailure.printStackTrace(System.err);
           process.requestStop();
-          cleanup.completeExceptionally(terminationFailure);
+          try { timing.emit(process, appletWorker, false); }
+          finally { cleanup.completeExceptionally(terminationFailure); }
         } else {
-          try {
-            io.close();
-          } catch (Throwable e) {
-            diagnosticCause = e;
-            result = ProcessOutcome.failed(ErrorCode.START_FAILED, "IO cleanup failed");
-          }
           synchronized (this) {
             context = null;
             cooperativeDispatcher = null;
           }
           if (result == null)
             result = ProcessOutcome.failed(ErrorCode.START_FAILED, "No runtime result");
-          try {
-            if (sys instanceof JvkProcessApi api) api.close();
-          } catch (Throwable ownedCleanupFailure) {
-            diagnosticCause = ownedCleanupFailure;
-            System.err.println("OWNED_CLEANUP_FAILED: PID " + process.pid());
-            ownedCleanupFailure.printStackTrace(System.err);
-            process.requestStop();
-            cleanup.completeExceptionally(ownedCleanupFailure);
-            return;
-          }
           boolean confirmed = process.confirm(result);
           // Report ordinary application failures only after final cleanup mapping.
           // Worker failures already have their owner-aware coordinator diagnostic.
@@ -648,13 +697,14 @@ public final class EspressoRuntimeProvider implements AutoCloseable {
           }
           traceWorker("CLEANUP_CONFIRMED exit=" + result.exitCode() + " error=" + result.error(), false);
           executions.remove(process.pid(), this);
-          cleanup.complete(null);
+          try { timing.emit(process, appletWorker, true); }
+          finally { cleanup.complete(null); }
         }
       }
     }
   }
 
-  private record Entry(String mainClass, List<String> arguments, String classpath,
+  private record Entry(String mainClass, List<String> arguments, List<Path> classpath,
                        List<String> addOpens) {}
 
   private static Entry resolve(LaunchRequest request) {
@@ -666,16 +716,14 @@ public final class EspressoRuntimeProvider implements AutoCloseable {
       if (words.size() != 1)
         throw new KernelException(ErrorCode.CONFIG_ERROR,
             "-version does not accept an application or arguments");
-      return new Entry("org.espressh.bootstrap.JavaVersionMain", List.of(), "", List.of());
+      return new Entry("org.espressh.bootstrap.JavaVersionMain", List.of(), List.of(), List.of());
     } else if (java.util.Set.of("javac", "javap", "jar", "javadoc").contains(words.get(0))) {
       main = "org.espressh.bootstrap.JdkToolMain";
       // Guest bootstrap is prepended separately to every Context classpath.
       return new Entry(
           main,
           List.copyOf(words),
-          cp.stream()
-              .map(Path::toString)
-              .collect(java.util.stream.Collectors.joining(File.pathSeparator)), List.of());
+          cp, List.of());
     } else if (words.get(0).equals("-jar")) {
       if (words.size() < 2) throw new KernelException(ErrorCode.ENTRY_NOT_FOUND, "Missing JAR");
       words.remove(0);
@@ -700,9 +748,7 @@ public final class EspressoRuntimeProvider implements AutoCloseable {
     return new Entry(
         main,
         List.copyOf(words),
-        cp.stream()
-            .map(Path::toString)
-            .collect(java.util.stream.Collectors.joining(File.pathSeparator)), addOpens);
+        cp, addOpens);
   }
 
   private static final class StoppedBeforeEntry extends RuntimeException {
@@ -719,5 +765,6 @@ public final class EspressoRuntimeProvider implements AutoCloseable {
     for (Execution execution : active) execution.stop();
     for (Execution execution : active) execution.cleanupCompletion().join();
     engine.close();
+    guestClasspath.close();
   }
 }

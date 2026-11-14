@@ -1,9 +1,12 @@
 package org.espressh.runtime;
 
 import java.nio.file.Path;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import org.espressh.core.*;
 import org.graalvm.polyglot.Value;
 import org.graalvm.polyglot.proxy.*;
@@ -22,6 +25,13 @@ public final class JvkProcessApi implements ProxyObject, AutoCloseable {
   private String dispatcher;
   private volatile boolean closed;
   private final CompletableFuture<Void> closeFuture = new CompletableFuture<>();
+  private final CompletableFuture<Void> ownedCleanup = new CompletableFuture<>();
+  private Thread closingThread;
+  private JVK processKernel;
+  private volatile ProcessIo effectiveIo;
+  private volatile Supplier<Map<String,String>> environmentSnapshot;
+  private Runnable processIoAbort = () -> {};
+  private final Set<ManagedProcessEndpoint> processEndpoints = ConcurrentHashMap.newKeySet();
 
   long terminalId() {
     return terminal;
@@ -30,7 +40,31 @@ public final class JvkProcessApi implements ProxyObject, AutoCloseable {
   private JVK terminalKernel;
   private final Set<GuestTerminalEndpoint> frontends = ConcurrentHashMap.newKeySet();
 
-  JvkProcessApi forTerminals(JVK owner) { terminalKernel = owner; return this; }
+  JvkProcessApi forTerminals(JVK owner) { terminalKernel = owner; processKernel = owner; return this; }
+
+  void bindProcessIo(ProcessIo io, Supplier<Map<String,String>> environment) {
+    effectiveIo = io;
+    environmentSnapshot = environment;
+  }
+
+  void unblockProcessIo() { processIoAbort.run(); }
+
+  CompletableFuture<Void> ownerClosedFuture() { return closeFuture.copy(); }
+
+  synchronized void processAuthorized() {
+    if (closed) throw callerStopped();
+    if (appletInspection || initKernel != null || shutdownTarget)
+      throw denied("Ordinary application process capability not granted to this role");
+    if (table.inspect(caller).state() != ProcessState.RUNNING)
+      throw denied("Caller is not running");
+  }
+
+  void stopChild(long pid) {
+    processAuthorized();
+    if (processKernel == null || !children.containsKey(pid) || table.inspect(pid).parentPid() != caller)
+      throw denied("Not an accepted direct child");
+    processKernel.stopOwnedChild(caller, pid);
+  }
 
   void terminalCallerAuthorized() {
     if (closed) throw new KernelException(ErrorCode.RESOURCE_CLOSED, "Caller closed");
@@ -100,6 +134,10 @@ public final class JvkProcessApi implements ProxyObject, AutoCloseable {
   }
 
   boolean shellCaller() { return shellCaller; }
+
+  boolean distributionRole() {
+    return initKernel != null || shellCaller || shutdownTarget || appletInspection;
+  }
 
   private JvkProcessApi forShutdown(JVK kernel) {
     this.kernel = kernel;
@@ -176,6 +214,11 @@ public final class JvkProcessApi implements ProxyObject, AutoCloseable {
           : null;
     }
     return switch (name) {
+      case "startProcess" -> (ProxyExecutable) a -> {
+        requireOne(a);
+        try { return startProcess(a[0]); }
+        catch (IOException invalid) { throw new UncheckedIOException(invalid); }
+      };
       case "kill" -> (ProxyExecutable) a -> {
         requireOne(a);
         if (!a[0].fitsInLong() || a[0].asLong() <= 0)
@@ -254,6 +297,7 @@ public final class JvkProcessApi implements ProxyObject, AutoCloseable {
               "processList",
               "kill",
               "spawn",
+              "startProcess",
               "waitOutcome",
               "runApplet",
               "terminalState",
@@ -274,6 +318,7 @@ public final class JvkProcessApi implements ProxyObject, AutoCloseable {
                     "processList",
                     "kill",
                     "spawn",
+                    "startProcess",
                     "waitOutcome",
                     "runApplet",
                     "terminalState",
@@ -349,8 +394,11 @@ public final class JvkProcessApi implements ProxyObject, AutoCloseable {
 
   public long spawn(LaunchRequest request) {
     synchronized (this) {
-      authorize();
-      var prepared = kernel != null ? kernel.prepareLaunch(request)
+      processAuthorized();
+      if (!allowed && (!request.runtimeId().equals(table.inspect(caller).request().runtimeId())
+          || JavaInvocation.selectsHome(request)))
+        throw denied("Ordinary child must use its caller's Guest runtime");
+      var prepared = allowed && kernel != null ? kernel.prepareLaunch(request)
           : JavaInvocation.prepare(request, this::profile,
               home -> { throw denied("Guest JavaHome selection requires JVK authority"); });
       request = prepared.request();
@@ -360,10 +408,10 @@ public final class JvkProcessApi implements ProxyObject, AutoCloseable {
         throw new KernelException(ErrorCode.CONFIG_ERROR,
             "Output redirection is not supported for lifecycle targets");
       synchronized (table) {
-        authorize();
+        processAuthorized();
         RuntimeProfile profile = prepared.profile();
         String ownerDispatcher = shellDispatcher;
-        boolean distribution = kernel != null && !ownerDispatcher.isEmpty()
+        boolean distribution = allowed && kernel != null && !ownerDispatcher.isEmpty()
             && kernel.sameDistribution(shellClasspath, request);
         boolean nested = packagedShell != null
             || distribution && request.argv().get(0).equals(ownerDispatcher + ":esh");
@@ -374,7 +422,8 @@ public final class JvkProcessApi implements ProxyObject, AutoCloseable {
         boolean foreground = false;
         try {
           // Output inheritance grants neither terminal input nor foreground/control authority.
-          var output = vts.processIo(terminal, caller);
+          var output = effectiveIo;
+          if (output == null) throw denied("Caller IO is not initialized");
           var childApi =
               new JvkProcessApi(table, provider, profiles, vts,
                   nested || shutdown ? terminal : -1, child.pid(), nested);
@@ -414,9 +463,7 @@ public final class JvkProcessApi implements ProxyObject, AutoCloseable {
   }
 
   public ProcessOutcome waitOutcome(long pid) {
-    if (!allowed) {
-      throw denied("Wait capability not granted");
-    }
+    processAuthorized();
     var process = table.inspect(pid);
     if (process.parentPid() != caller) {
       throw denied("Not a direct child");
@@ -444,6 +491,44 @@ public final class JvkProcessApi implements ProxyObject, AutoCloseable {
     } catch (ExecutionException failure) {
       throw new KernelException(ErrorCode.START_FAILED, "Child cleanup failed for PID " + pid,
           failure.getCause());
+    }
+  }
+
+  private Object startProcess(Value value) throws IOException {
+    synchronized (this) {
+      processAuthorized();
+      if (processKernel == null || environmentSnapshot == null)
+        throw new IOException("Managed process service is unavailable");
+      var current = table.inspect(caller).request();
+      RuntimeProfile runtime = profile(current.runtimeId());
+      LaunchRequest request = ManagedProcessCommand.parse(value, current, runtime, environmentSnapshot.get());
+      Value merge = value.getMember("mergeError");
+      if (merge == null || !merge.isBoolean()) throw new IOException("Expected mergeError boolean");
+      boolean merged = merge.asBoolean();
+      synchronized (table) {
+        processAuthorized();
+        // Validation above must finish before either a PID or pipe is allocated.
+        var child = table.spawn(caller, request);
+        ManagedProcessEndpoint.Pipes pipes = null;
+        try {
+          pipes = new ManagedProcessEndpoint.Pipes(merged);
+          var childApi = new JvkProcessApi(table, provider, profiles, vts, -1, child.pid(), false)
+              .forTerminals(processKernel);
+          childApi.processIoAbort = pipes::abort;
+          var execution = provider.start(child, runtime, pipes.childIo(), childApi);
+          var endpoint = new ManagedProcessEndpoint(this, child, execution, pipes);
+          children.put(child.pid(), execution.cleanupCompletion());
+          processEndpoints.add(endpoint);
+          // Completed writers already supply EOF. Let the Guest Process alone
+          // retain pending output instead of retaining all pipe buffers for the owner lifetime.
+          execution.cleanupCompletion().thenRun(() -> processEndpoints.remove(endpoint));
+          return endpoint;
+        } catch (RuntimeException | Error failure) {
+          if (pipes != null) pipes.abort();
+          if (!child.state().terminal()) child.confirm(ProcessOutcome.failed(ErrorCode.START_FAILED, "Managed start failed"));
+          throw failure;
+        }
+      }
     }
   }
 
@@ -650,16 +735,41 @@ public final class JvkProcessApi implements ProxyObject, AutoCloseable {
   @Override
   public void close() {
     TerminalAppletWorker w;
+    boolean first;
     synchronized (this) {
-      closed = true;
+      first = !closed;
+      if (first) { closed = true; closingThread = Thread.currentThread(); }
+      else if (closingThread == Thread.currentThread()) return;
       w = worker;
     }
+    if (!first) { ownedCleanup.join(); return; }
     // Complete outside the lock, before owned cleanup can block.
     closeFuture.complete(null);
-    for (var frontend : frontends) frontend.ownerClosed();
-    frontends.clear();
-    if (w != null) {
-      w.close();
+    try {
+      for (var endpoint : processEndpoints) endpoint.ownerClosed();
+      for (var frontend : frontends) frontend.ownerClosed();
+      frontends.clear();
+      if (w != null) w.close();
+      if (processKernel != null) {
+        for (long pid : children.keySet()) {
+          if (!table.inspect(pid).state().terminal()) processKernel.stopOwnedChild(caller, pid);
+        }
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        for (var completion : children.values()) {
+          completion.get(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
+        }
+      }
+      processEndpoints.clear();
+      ownedCleanup.complete(null);
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      var failure = new KernelException(ErrorCode.SOURCE_CLOSED, "Owned child cleanup interrupted", interrupted);
+      ownedCleanup.completeExceptionally(failure); throw failure;
+    } catch (ExecutionException | TimeoutException failed) {
+      var failure = new KernelException(ErrorCode.TIMEOUT, "Owned child cleanup unconfirmed", failed);
+      ownedCleanup.completeExceptionally(failure); throw failure;
+    } catch (RuntimeException | Error failed) {
+      ownedCleanup.completeExceptionally(failed); throw failed;
     }
   }
 

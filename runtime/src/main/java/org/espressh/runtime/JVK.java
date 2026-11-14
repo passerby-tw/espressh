@@ -207,12 +207,7 @@ public final class JVK implements AutoCloseable {
   }
 
   boolean sameDistribution(List<Path> parentClasspath, LaunchRequest child) {
-    var expected = new LinkedHashSet<Path>();
-    expected.add(bootstrap.normalize());
-    parentClasspath.forEach(p -> expected.add(p.toAbsolutePath().normalize()));
-    var actual = new LinkedHashSet<Path>();
-    child.classpath().forEach(p -> actual.add(p.toAbsolutePath().normalize()));
-    return new ArrayList<>(expected).equals(new ArrayList<>(actual));
+    return provider.sameDistribution(parentClasspath, child.classpath());
   }
 
   JarEntryPlan packagedShell(LaunchRequest request, String dispatcher) {
@@ -288,13 +283,10 @@ public final class JVK implements AutoCloseable {
         throw new KernelException(ErrorCode.CONFIG_ERROR, "Host frontend is not configured");
       }
       var request = init.request();
-      var cp = new ArrayList<Path>();
-      cp.add(bootstrap);
-      cp.addAll(request.classpath());
       if (!shell.runtimeId().equals("host")
           || !shell.cwd().equals(request.cwd())
           || !shell.environment().equals(request.environment())
-          || !(shell.classpath().equals(request.classpath()) || shell.classpath().equals(cp))
+          || !provider.sameBootClasspath(request.classpath(), shell.classpath())
           || !shell.argv().get(0).endsWith(":esh")) {
         throw new KernelException(ErrorCode.CONFIG_ERROR, "Boot shell snapshot mismatch");
       }
@@ -501,6 +493,21 @@ public final class JVK implements AutoCloseable {
         controls.execute(() -> stop(pid));
       } catch (RejectedExecutionException closed) {
         throw new KernelException(ErrorCode.RESOURCE_CLOSED, "JVK control dispatch closed");
+      }
+      return true;
+    }
+  }
+
+  /** Owner cleanup must remain possible after shutdown has frozen public control requests. */
+  boolean stopOwnedChild(long parent, long pid) {
+    synchronized (processes) {
+      var child = processes.inspect(pid);
+      if (child.parentPid() != parent || pid == 1)
+        throw new KernelException(ErrorCode.ACCESS_DENIED, "Not an owned child");
+      if (child.state().terminal()) return false;
+      try { controls.execute(() -> stop(pid)); }
+      catch (RejectedExecutionException closed) {
+        throw new KernelException(ErrorCode.RESOURCE_CLOSED, "JVK control dispatch closed", closed);
       }
       return true;
     }

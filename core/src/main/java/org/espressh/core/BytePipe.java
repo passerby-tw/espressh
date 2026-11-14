@@ -25,6 +25,10 @@ public final class BytePipe implements AutoCloseable {
         if (commandInterrupted) throw new IOException("Command input interrupted");
     }
     private void writable() throws IOException { if (readerClosed || writerClosed || cancelled) throw new IOException("RESOURCE_CLOSED"); }
+    private void writable(Writer writer) throws IOException {
+        writable();
+        if (writer.closed) throw new IOException("RESOURCE_CLOSED");
+    }
     private synchronized int readBytes(byte[] dst, int off, int len) throws IOException {
         Objects.checkFromIndexSize(off, len, dst.length);
         if (len == 0) return 0;
@@ -35,11 +39,11 @@ public final class BytePipe implements AutoCloseable {
         for (int i=0; i<count; i++) dst[off+i] = bytes[(head+i)%bytes.length];
         head=(head+count)%bytes.length; size-=count; notifyAll(); return count;
     }
-    private synchronized void writeBytes(byte[] src, int off, int len) throws IOException {
-        Objects.checkFromIndexSize(off, len, src.length); writable();
+    private synchronized void writeBytes(byte[] src, int off, int len, Writer writer) throws IOException {
+        Objects.checkFromIndexSize(off, len, src.length); writable(writer);
         for (int i=0; i<len;) {
-            while (size == bytes.length) { awaitChange(); writable(); }
-            writable(); int count = Math.min(len-i, bytes.length-size);
+            while (size == bytes.length) { awaitChange(); writable(writer); }
+            writable(writer); int count = Math.min(len-i, bytes.length-size);
             for (int j=0; j<count; j++) bytes[(head+size+j)%bytes.length]=src[off+i+j];
             size+=count; i+=count; notifyAll();
         }
@@ -50,11 +54,29 @@ public final class BytePipe implements AutoCloseable {
         @Override public int available() throws IOException { synchronized(BytePipe.this) { readable(); return size; } }
         @Override public void close() { synchronized(BytePipe.this) { readerClosed=true; size=0; BytePipe.this.notifyAll(); } }
     };
-    private final OutputStream output = new OutputStream() {
+    private final class Writer extends OutputStream {
+        private final boolean root;
+        private boolean closed;
+        Writer(boolean root) { this.root = root; }
+        Writer fork() { return new Writer(false); }
         @Override public void write(int b) throws IOException { write(new byte[]{(byte)b}); }
-        @Override public void write(byte[] b,int off,int len) throws IOException { writeBytes(b,off,len); }
-        @Override public void close() { synchronized(BytePipe.this) { writerClosed=true; BytePipe.this.notifyAll(); } }
-    };
+        @Override public void write(byte[] b,int off,int len) throws IOException { writeBytes(b,off,len,this); }
+        @Override public void close() {
+            synchronized(BytePipe.this) {
+                closed=true;
+                if(root) writerClosed=true;
+                BytePipe.this.notifyAll();
+            }
+        }
+    }
+    private final OutputStream output = new Writer(true);
+    /** A child can cancel its blocked inherited write without closing the shared writer. */
+    static OutputStream borrowWriter(OutputStream stream) {
+        return stream instanceof BytePipe.Writer writer ? writer.fork() : null;
+    }
+    static void closeBorrowedWriter(OutputStream stream) {
+        if (stream instanceof BytePipe.Writer writer && !writer.root) writer.close();
+    }
     synchronized void resetForInterrupt() throws IOException {
         writable();head=0;size=1;bytes[0]=3;notifyAll();
     }

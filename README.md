@@ -57,6 +57,8 @@ runtime/target/espressh.jar
 
 This single JAR includes Espressh, JBox, and runtime dependencies. No separate boot JAR or dependency directory is required. **A JDK must still be installed.**
 
+Espressh prepares a small private Guest classpath in the host JVM's temporary directory, which must be writable. It keeps the public distribution as one JAR and removes the temporary files after confirmed shutdown.
+
 Stop any Espressh instance using the JAR before rebuilding it, or build in a separate directory to avoid replacing a running application's JAR.
 
 ## Start the shell

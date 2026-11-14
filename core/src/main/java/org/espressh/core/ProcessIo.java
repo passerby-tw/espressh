@@ -17,10 +17,17 @@ public record ProcessIo(InputStream in, OutputStream out, OutputStream err) impl
         return new ProcessIo(new FilterInputStream(in) { @Override public void close() {} }, shield(out), shield(err));
     }
     private static OutputStream shield(OutputStream out) {
+        OutputStream pipeWriter = BytePipe.borrowWriter(out);
+        if (pipeWriter != null) return pipeWriter;
         return new FilterOutputStream(out) {
             @Override public void write(byte[] b,int off,int len) throws IOException { out.write(b,off,len); }
             @Override public void close() throws IOException { flush(); }
         };
+    }
+    /** Only release per-child borrowed pipe views; shared output and pending bytes remain. */
+    public void unblockBorrowedWriters() {
+        BytePipe.closeBorrowedWriter(out);
+        BytePipe.closeBorrowedWriter(err);
     }
     public static ProcessIo background(OutputStream out, OutputStream err) { return borrowed(InputStream.nullInputStream(), out, err); }
     /** Opens owned output files; the caller transfers the original endpoints to the result. */

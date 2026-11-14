@@ -24,6 +24,7 @@ public final class EnvSubstitution extends JavaSubstitution {
         private volatile java.util.Map<String,String> snapshot;
         public EnvironmentState(java.util.Map<String,String> env) { replace(env); }
         public void replace(java.util.Map<String,String> env) { snapshot=java.util.Map.copyOf(env); }
+        public java.util.Map<String,String> snapshot() { return snapshot; }
     }
     private static final ThreadLocal<EnvironmentState> INITIALIZING=new ThreadLocal<>();
     private static final java.util.Map<EspressoContext,EnvironmentState> STATES=

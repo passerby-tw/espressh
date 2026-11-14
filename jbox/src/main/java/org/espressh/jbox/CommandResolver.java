@@ -74,6 +74,9 @@ final class CommandResolver {
             for(Path entry:shell.classpath()) {
                 if(java.nio.file.Files.isSameFile(jar,entry)){current=true;break;}
             }
+            String distribution=System.getProperty("espressh.distribution");
+            if(!current&&distribution!=null)
+                current=java.nio.file.Files.isSameFile(jar,Path.of(distribution));
             if(!current)return false;
             try(var file=new java.util.jar.JarFile(jar.toFile())) {
                 var manifest=file.getManifest();
