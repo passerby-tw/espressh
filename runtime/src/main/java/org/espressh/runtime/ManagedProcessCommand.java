@@ -13,6 +13,8 @@ import org.graalvm.polyglot.Value;
 
 /** Validate the finite standard-Java launcher before allocating a PID or any pipe. */
 final class ManagedProcessCommand {
+    private static final List<String> SUPPORTED_GUEST_VERSIONS = List.of("25.0.5.0.3", "25.0.4.1.1");
+
     private ManagedProcessCommand() {}
 
     static LaunchRequest parse(Value value, LaunchRequest caller, RuntimeProfile runtime,
@@ -87,7 +89,8 @@ final class ManagedProcessCommand {
     private static void requireSupported(RuntimeProfile runtime) throws IOException {
         if (!System.getProperty("os.name").equals("Linux")
                 || !List.of("amd64", "x86_64").contains(System.getProperty("os.arch"))
-                || !runtime.version().equals("25.0.4.1.1"))
-            throw new IOException("Managed ProcessBuilder requires Linux x86_64 / Guest JDK25.0.4.1.1");
+                || !SUPPORTED_GUEST_VERSIONS.contains(runtime.version()))
+            throw new IOException("Managed ProcessBuilder requires Linux x86_64 / Guest JDK "
+                    + String.join(" or ", SUPPORTED_GUEST_VERSIONS));
     }
 }

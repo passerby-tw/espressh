@@ -41,9 +41,9 @@ Then enter at the `esh>` prompt:
 java -jar benchmarks/startup/target/startup-benchmark.jar guest-process 30
 ```
 
-Use an absolute JAR path if Espressh starts in another working directory. The
-managed ProcessBuilder adapter must be present; older builds that deny process
-creation will fail. No privileged boot fixture is required.
+Use an absolute JAR path if Espressh starts in another working directory.
+The managed ProcessBuilder adapter supports Guest JDK 25.0.5.0.3 and
+25.0.4.1.1 on Linux x86_64.
 
 The mode argument is optional; `java -jar target/startup-benchmark.jar 30` detects
 the environment from `java.vm.name`. The explicit modes reject an unexpected VM
