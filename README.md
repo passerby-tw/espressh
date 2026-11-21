@@ -249,3 +249,17 @@ Enter `Y` or press Enter to coordinate shutdown of all JVPs and exit Espressh. E
 | [runtime](runtime/) | Host entry point, Espresso integration, and single-JAR packaging |
 
 Only applications that explicitly use JVK features, such as requesting a VTS virtual terminal, need `jvk-api`. Ordinary Java applications have no such dependency. Use Maven `provided` scope when depending on the API. Espressh supplies the API and provider at runtime; applications should not bundle JVK or Espresso implementations.
+
+
+## License
+
+Espressh-authored source, including the standalone JVK API, is available under
+the [MIT License](LICENSE). Vendored Espresso and other third-party components
+retain their respective licenses and notices.
+
+The combined `espressh.jar` distribution, which includes the modified Espresso
+JVM, is licensed as a whole under [GPL-2.0-only](espresso/espresso/LICENSE).
+Binary releases must provide the complete corresponding source for the exact
+build, including the Espresso modifications and build scripts, and preserve
+applicable third-party notices. Container distributions must also satisfy the
+license terms of their base image.

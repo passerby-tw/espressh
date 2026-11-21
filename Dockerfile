@@ -6,7 +6,7 @@ RUN microdnf install -y maven \
     && microdnf clean all
 
 WORKDIR /src
-COPY pom.xml ./
+COPY pom.xml LICENSE ./
 COPY jvk-api/ ./jvk-api/
 COPY core/ ./core/
 COPY guest-bootstrap/ ./guest-bootstrap/
@@ -22,7 +22,8 @@ RUN useradd --create-home --uid 1000 --user-group espressh \
     && chown espressh:espressh /workspace
 
 COPY --from=build /src/runtime/target/espressh.jar /opt/espressh/espressh.jar
-COPY LICENSE /opt/espressh/LICENSE
+COPY LICENSE /opt/espressh/LICENSE-MIT
+COPY espresso/espresso/LICENSE /opt/espressh/LICENSE-GPL-2.0
 
 ENV HOME=/home/espressh
 USER espressh

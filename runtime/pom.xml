@@ -49,6 +49,25 @@
     </dependency>
   </dependencies>
   <build>
+    <resources>
+      <resource>
+        <directory>src/main/resources</directory>
+      </resource>
+      <resource>
+        <directory>${project.basedir}/..</directory>
+        <targetPath>META-INF/licenses/espressh</targetPath>
+        <includes>
+          <include>LICENSE</include>
+        </includes>
+      </resource>
+      <resource>
+        <directory>${project.basedir}/../espresso/espresso</directory>
+        <targetPath>META-INF/licenses/espresso</targetPath>
+        <includes>
+          <include>LICENSE</include>
+        </includes>
+      </resource>
+    </resources>
     <finalName>espressh</finalName>
     <plugins>
       <plugin>

@@ -6,11 +6,26 @@
   <version>0.29.0</version>
   <name>JVK API</name>
   <description>Public JVK value projections and terminal interfaces without implementation dependencies.</description>
+  <licenses>
+    <license>
+      <name>MIT License</name>
+      <url>https://opensource.org/license/mit</url>
+    </license>
+  </licenses>
   <properties>
     <maven.compiler.release>17</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
   <build>
+    <resources>
+      <resource>
+        <directory>${project.basedir}/..</directory>
+        <targetPath>META-INF/licenses/espressh</targetPath>
+        <includes>
+          <include>LICENSE</include>
+        </includes>
+      </resource>
+    </resources>
     <plugins>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
