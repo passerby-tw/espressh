@@ -456,15 +456,11 @@ public final class EspressoRuntimeProvider implements AutoCloseable {
       }
     }
 
-    private void finishContext(Context guest, boolean normalEntryCleanup) {
+    private void finishContext(Context guest, boolean cancelOnClose) {
       boolean own, cancel;
       synchronized (this) {
         own = !contextClosing;
-        // MAIN_BOUND applies to every application, not only PID 1. A returned
-        // entry must not wait forever for residual Guest threads in close(false).
-        // Keep the existing failure/System.exit translation path; a cleanup-only
-        // cancellation preserves EXITED unless a stop request was accepted.
-        cancel = stop || normalEntryCleanup;
+        cancel = stop || cancelOnClose;
         if (own) contextClosing = true;
       }
       if (own) closeContext(guest, cancel);
@@ -490,6 +486,7 @@ public final class EspressoRuntimeProvider implements AutoCloseable {
     private void run() {
       ProcessOutcome result = null;
       Context created = null;
+      boolean initializingJava = false;
       boolean entryStarted = false;
       org.espressh.runtime.substitutions.EnvSubstitution.begin(environment);
       try {
@@ -561,7 +558,9 @@ public final class EspressoRuntimeProvider implements AutoCloseable {
         created.getPolyglotBindings().putMember("process_stdout", new IoEndpoint(io.out()));
         created.getPolyglotBindings().putMember("process_stderr", new IoEndpoint(io.err()));
         timing.begin(JAVA_INITIALIZE);
+        initializingJava = true;
         created.initialize("java");
+        initializingJava = false;
         // Associate this Context before applet class initialization; owned threads use the same
         // state.
         timing.begin(ENV_LINK);
@@ -620,7 +619,10 @@ public final class EspressoRuntimeProvider implements AutoCloseable {
                 e instanceof KernelException k ? k.getMessage() : "Runtime execution failed");
       } finally {
         timing.begin(ENTRY_END);
-        boolean normalEntryCleanup = diagnosticCause == null;
+        // Both a returned main and a failed Java boot can leave Guest threads running.
+        // Cancellation for cleanup alone preserves the original process outcome.
+        boolean cancelOnClose = diagnosticCause == null
+            || (initializingJava && result != null && result.state() == ProcessState.FAILED);
         traceWorker("ENTRY_ENDED", false);
         org.espressh.runtime.substitutions.EnvSubstitution.end();
         rejectCommands(new KernelException(ErrorCode.RESOURCE_CLOSED, "Execution ended"));
@@ -647,7 +649,7 @@ public final class EspressoRuntimeProvider implements AutoCloseable {
           } finally {
             try {
               timing.begin(CONTEXT_CLOSE);
-              if (created != null) finishContext(created, normalEntryCleanup);
+              if (created != null) finishContext(created, cancelOnClose);
             } finally {
               timing.begin(GRAPHICS_CLOSE);
               graphics.close();
