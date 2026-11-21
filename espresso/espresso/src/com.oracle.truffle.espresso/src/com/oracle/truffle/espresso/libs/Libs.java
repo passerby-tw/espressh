@@ -39,10 +39,18 @@ import com.oracle.truffle.espresso.runtime.EspressoContext;
  */
 public final class Libs {
 
+    public interface Extension {
+        void register(java.util.List<Lib.Factory> factories);
+    }
+
     private final EconomicMap<String, Lib.Factory> knownLibs = EconomicMap.create();
 
     public Libs(EspressoLanguage lang) {
-        for (Lib.Factory lib : LibsCollector.getInstances(Lib.Factory.class)) {
+        var factories = LibsCollector.getInstances(Lib.Factory.class);
+        for (Extension extension : java.util.ServiceLoader.load(Extension.class, Extension.class.getClassLoader())) {
+            extension.register(factories);
+        }
+        for (Lib.Factory lib : factories) {
             if (lib.isValidfor(lang)) {
                 knownLibs.put(lib.name(), lib);
             }

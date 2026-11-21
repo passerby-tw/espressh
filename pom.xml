@@ -10,12 +10,14 @@
     <module>core</module>
     <module>guest-bootstrap</module>
     <module>jbox</module>
+    <module>espresso/processor</module>
+    <module>espresso/language</module>
     <module>runtime</module>
   </modules>
   <properties>
     <maven.compiler.release>17</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <graalvm.version>25.4.4.1.1</graalvm.version>
+    <graalvm.version>25.5.5.0.3</graalvm.version>
   </properties>
   <build>
     <pluginManagement>

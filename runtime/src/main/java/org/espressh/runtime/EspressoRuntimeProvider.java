@@ -30,9 +30,7 @@ public final class EspressoRuntimeProvider implements AutoCloseable {
   }
 
   private static Engine newEngine() {
-    var factories =
-        com.oracle.truffle.espresso.substitutions.SubstitutionCollector.getInstances(
-            com.oracle.truffle.espresso.substitutions.JavaSubstitution.Factory.class);
+    var factories = com.oracle.truffle.espresso.substitutions.Substitutions.configuredFactories();
     if (!factories.containsAll(
         List.of(
             org.espressh.runtime.substitutions.EnvSubstitution.NAMED,
@@ -74,8 +72,7 @@ public final class EspressoRuntimeProvider implements AutoCloseable {
             org.espressh.runtime.substitutions.awt.AwtInputContextSubstitution.FACTORY,
             org.espressh.runtime.substitutions.awt.UnsupportedFontSubstitution.FACTORY)))
       throw new IllegalStateException(
-          "Missing pinned Espresso substitutions: espressh-runtime must precede Espresso dependency"
-              + " JARs on the Host classpath");
+          "Missing Espressh substitution provider");
     if (!factories.containsAll(java.util.Arrays.asList(org.espressh.runtime.substitutions.awt.AwtTextSubstitution.FACTORIES)))
       throw new IllegalStateException("Missing Guest AWT text substitutions");
     var builder = Engine.newBuilder("java").option("engine.WarnInterpreterOnly", "false");

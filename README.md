@@ -23,14 +23,15 @@ Java applications run in separate JVPs. Some short JBox commands run sequentiall
 
 ## Requirements
 
-The build and runtime have been verified with:
+Use the following build environment:
 
 | Component | Environment |
 | --- | --- |
 | Operating system | Linux x86_64 |
-| Host JDK | GraalVM Community JDK 25.0.4.1.1 |
+| Host JDK | GraalVM Community JDK 25.0.5.0.3 |
 | Maven | 3.8.7 |
-| Espresso / Truffle SDK | 25.4.4.1.1, downloaded by Maven |
+| Espresso | 25.5.5.0.3, built from the source in this repository |
+| Truffle / Polyglot SDK | 25.5.5.0.3, downloaded by Maven |
 
 Use a complete JDK and check which Java installation Maven uses:
 
@@ -39,7 +40,7 @@ java -version
 mvn -version
 ```
 
-The SDK version is pinned in [pom.xml](pom.xml). Sources target Java 17 bytecode; the complete runtime has been verified with the JDK 25 environment above, rather than JDK 17.
+The SDK version is pinned in [pom.xml](pom.xml). Maven compiles the local Espresso modules, including the annotation processor, as part of the same build.
 
 ## Build
 

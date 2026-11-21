@@ -30,9 +30,9 @@
       <version>${graalvm.version}</version>
     </dependency>
     <dependency>
-      <groupId>org.graalvm.espresso</groupId>
-      <artifactId>espresso-language</artifactId>
-      <version>${graalvm.version}</version>
+      <groupId>org.espressh</groupId>
+      <artifactId>espressh-espresso-language</artifactId>
+      <version>${project.version}</version>
     </dependency>
     <dependency>
       <groupId>org.graalvm.polyglot</groupId>
@@ -40,6 +40,12 @@
       <version>${graalvm.version}</version>
       <type>pom</type>
       <scope>runtime</scope>
+      <exclusions>
+        <exclusion>
+          <groupId>org.graalvm.espresso</groupId>
+          <artifactId>espresso-language</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
   </dependencies>
   <build>
@@ -67,14 +73,6 @@
                     <exclude>META-INF/*.RSA</exclude>
                     <exclude>META-INF/*.DSA</exclude>
                     <exclude>META-INF/INDEX.LIST</exclude>
-                  </excludes>
-                </filter>
-                <filter>
-                  <artifact>org.graalvm.espresso:espresso-language</artifact>
-                  <excludes>
-                    <!-- Keep the runtime's extended collectors. -->
-                    <exclude>com/oracle/truffle/espresso/substitutions/SubstitutionCollector.class</exclude>
-                    <exclude>com/oracle/truffle/espresso/libs/LibsCollector.class</exclude>
                   </excludes>
                 </filter>
               </filters>

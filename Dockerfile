@@ -11,6 +11,7 @@ COPY jvk-api/ ./jvk-api/
 COPY core/ ./core/
 COPY guest-bootstrap/ ./guest-bootstrap/
 COPY jbox/ ./jbox/
+COPY espresso/ ./espresso/
 COPY runtime/ ./runtime/
 RUN mvn -B -ntp package
 

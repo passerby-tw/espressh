@@ -136,12 +136,24 @@ public final class Substitutions extends ContextAccessImpl {
         }
     }
 
+    public interface Extension {
+        void register(java.util.List<JavaSubstitution.Factory> factories);
+    }
+
     private static final EconomicMap<MethodKey, JavaSubstitution.Factory> GLOBAL_SUBSTITUTIONS = EconomicMap.create();
 
     private final ConcurrentHashMap<MethodKey, EspressoRootNodeFactory> runtimeSubstitutions = new ConcurrentHashMap<>();
 
+    public static List<JavaSubstitution.Factory> configuredFactories() {
+        var factories = SubstitutionCollector.getInstances(JavaSubstitution.Factory.class);
+        for (Extension extension : java.util.ServiceLoader.load(Extension.class, Extension.class.getClassLoader())) {
+            extension.register(factories);
+        }
+        return List.copyOf(factories);
+    }
+
     static {
-        for (JavaSubstitution.Factory factory : SubstitutionCollector.getInstances(JavaSubstitution.Factory.class)) {
+        for (JavaSubstitution.Factory factory : configuredFactories()) {
             registerStaticSubstitution(factory);
         }
     }

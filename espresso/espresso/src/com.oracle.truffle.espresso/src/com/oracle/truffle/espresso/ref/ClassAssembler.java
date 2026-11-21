@@ -22,28 +22,28 @@
  */
 package com.oracle.truffle.espresso.ref;
 
-import static com.oracle.truffle.espresso.shadowed.asm.Opcodes.ACC_ABSTRACT;
-import static com.oracle.truffle.espresso.shadowed.asm.Opcodes.ACC_BRIDGE;
-import static com.oracle.truffle.espresso.shadowed.asm.Opcodes.ACC_FINAL;
-import static com.oracle.truffle.espresso.shadowed.asm.Opcodes.ACC_PRIVATE;
-import static com.oracle.truffle.espresso.shadowed.asm.Opcodes.ACC_PROTECTED;
-import static com.oracle.truffle.espresso.shadowed.asm.Opcodes.ACC_PUBLIC;
-import static com.oracle.truffle.espresso.shadowed.asm.Opcodes.ACC_SUPER;
-import static com.oracle.truffle.espresso.shadowed.asm.Opcodes.ACC_SYNTHETIC;
-import static com.oracle.truffle.espresso.shadowed.asm.Opcodes.ALOAD;
-import static com.oracle.truffle.espresso.shadowed.asm.Opcodes.ARETURN;
-import static com.oracle.truffle.espresso.shadowed.asm.Opcodes.CHECKCAST;
-import static com.oracle.truffle.espresso.shadowed.asm.Opcodes.GETFIELD;
-import static com.oracle.truffle.espresso.shadowed.asm.Opcodes.INVOKESPECIAL;
-import static com.oracle.truffle.espresso.shadowed.asm.Opcodes.PUTFIELD;
-import static com.oracle.truffle.espresso.shadowed.asm.Opcodes.RETURN;
-import static com.oracle.truffle.espresso.shadowed.asm.Opcodes.V1_8;
+import static org.objectweb.asm.Opcodes.ACC_ABSTRACT;
+import static org.objectweb.asm.Opcodes.ACC_BRIDGE;
+import static org.objectweb.asm.Opcodes.ACC_FINAL;
+import static org.objectweb.asm.Opcodes.ACC_PRIVATE;
+import static org.objectweb.asm.Opcodes.ACC_PROTECTED;
+import static org.objectweb.asm.Opcodes.ACC_PUBLIC;
+import static org.objectweb.asm.Opcodes.ACC_SUPER;
+import static org.objectweb.asm.Opcodes.ACC_SYNTHETIC;
+import static org.objectweb.asm.Opcodes.ALOAD;
+import static org.objectweb.asm.Opcodes.ARETURN;
+import static org.objectweb.asm.Opcodes.CHECKCAST;
+import static org.objectweb.asm.Opcodes.GETFIELD;
+import static org.objectweb.asm.Opcodes.INVOKESPECIAL;
+import static org.objectweb.asm.Opcodes.PUTFIELD;
+import static org.objectweb.asm.Opcodes.RETURN;
+import static org.objectweb.asm.Opcodes.V1_8;
 
-import com.oracle.truffle.espresso.shadowed.asm.AnnotationVisitor;
-import com.oracle.truffle.espresso.shadowed.asm.ClassWriter;
-import com.oracle.truffle.espresso.shadowed.asm.FieldVisitor;
-import com.oracle.truffle.espresso.shadowed.asm.MethodVisitor;
-import com.oracle.truffle.espresso.shadowed.asm.Type;
+import org.objectweb.asm.AnnotationVisitor;
+import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.FieldVisitor;
+import org.objectweb.asm.MethodVisitor;
+import org.objectweb.asm.Type;
 
 final class ClassAssembler {
 
