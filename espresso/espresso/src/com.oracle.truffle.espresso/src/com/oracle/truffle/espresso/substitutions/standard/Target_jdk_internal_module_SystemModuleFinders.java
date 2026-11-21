@@ -20,6 +20,7 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
+// Modified by Espressh on 2026-11-21 to identify the SDK Polyglot module path.
 package com.oracle.truffle.espresso.substitutions.standard;
 
 import java.nio.file.Files;
@@ -97,7 +98,11 @@ final class Target_jdk_internal_module_SystemModuleFinders {
                 context.getLogger().warning("Missing jar for extension module" + me.moduleName() + ": " + jar);
                 continue;
             }
-            extensionPaths.add(getEspressoModulePath(context, jar));
+            StaticObject path = getEspressoModulePath(context, jar);
+            if (me.moduleName().equals("espresso.polyglot")) {
+                context.setPolyglotExtensionPath(path);
+            }
+            extensionPaths.add(path);
         }
         if (extensionPaths.isEmpty()) {
             return StaticObject.NULL;

@@ -20,6 +20,7 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
+// Modified by Espressh on 2026-11-21 for Context-local extension discovery.
 package com.oracle.truffle.espresso.runtime;
 
 import static com.oracle.truffle.espresso.jni.JniEnv.JNI_OK;
@@ -1373,6 +1374,17 @@ public final class EspressoContext implements RuntimeAccess<Klass, Method, Field
 
     public UpcallStubs getUpcallStubs() {
         return upcallStubs;
+    }
+
+    // Only the SDK path supplied to the current extension finder is eligible for indexed discovery.
+    private volatile StaticObject polyglotExtensionPath;
+
+    public void setPolyglotExtensionPath(StaticObject path) {
+        polyglotExtensionPath = path;
+    }
+
+    public boolean isPolyglotExtensionPath(StaticObject path) {
+        return path == polyglotExtensionPath;
     }
 
     public Path getEspressoLibs() {

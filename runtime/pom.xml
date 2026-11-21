@@ -71,6 +71,31 @@
     <finalName>espressh</finalName>
     <plugins>
       <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>3.5.0</version>
+        <executions>
+          <execution>
+            <id>index-espresso-polyglot-modules</id>
+            <phase>process-classes</phase>
+            <goals>
+              <goal>exec</goal>
+            </goals>
+            <configuration>
+              <executable>${java.home}/bin/java</executable>
+              <arguments>
+                <argument>-cp</argument>
+                <classpath>
+                  <dependency>org.graalvm.espresso:espresso-libs-resources</dependency>
+                </classpath>
+                <argument>${project.basedir}/src/build/IndexPolyglotModules.java</argument>
+                <argument>${project.build.outputDirectory}/META-INF/espressh/espresso-polyglot-modules.properties</argument>
+              </arguments>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-shade-plugin</artifactId>
         <version>3.6.1</version>
