@@ -92,7 +92,12 @@ public final class HostConsole implements AutoCloseable {
         int value = input.read();
         if (closed) return;
         if (value < 0) {
-          lost(t);
+          if (input == System.in && System.console() != null) {
+            lost(t);
+          } else {
+            // A pipe writer can finish before esh starts reading. Drain its bytes before EOF.
+            vts.inputEnded(t.frontendId());
+          }
           return;
         }
         // A byte-producing frontend uses the same control route as SIGINT.

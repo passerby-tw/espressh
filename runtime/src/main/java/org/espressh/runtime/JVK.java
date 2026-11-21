@@ -325,8 +325,10 @@ public final class JVK implements AutoCloseable {
       Thread.currentThread().interrupt();
       throw new KernelException(ErrorCode.SOURCE_CLOSED, "Terminal creation interrupted");
     } catch (ExecutionException failure) {
-      terminals.lost(terminal.terminal().frontendId());
-      throw new KernelException(ErrorCode.START_FAILED, "Terminal-root esh initialization failed");
+      // The execution cleanup callback may already have removed this frontend.
+      frontendLost(terminal.terminal().frontendId());
+      throw new KernelException(ErrorCode.START_FAILED, "Terminal-root esh initialization failed",
+          failure.getCause());
     }
   }
 
